@@ -60,71 +60,46 @@ def frameForm(mNodes, mPairs, nElem, eM, sM, rho, area, mI, mJ):
                 nInd += 1
     return nodeDF, elemDF
 
-def massMat(rho, area, aV, mJ):
+def massMat(rho, A, aV, Jx):
     # den: material density
-    # area: cross sectional area
+    # A: cross sectional A
     # elemL: length of element
-    # mJ: second moment of area
-    rV = mJ/area
+    # Jx: second moment of A
+    rV = Jx/A
     a2V = aV**2
     mass = np.zeros((12, 12), dtype=float)
-    mass[np.array([0, 6]), np.array([0, 6])] = 70*np.ones((1, 2))
-    mass[np.array([1, 2, 7, 8]), np.array([1, 2, 7, 8])] = 78 * np.ones((1, 4))
-    mass[np.array([3, 9]), np.array([3, 9])] = (70*rV) * np.ones((1, 2))
-    mass[np.array([4, 5, 10, 11]), np.array([4, 5, 10, 11])] = (8*a2V) * np.ones((1, 4))
-    mass[np.array([0, 6]), np.array([6, 0])] = 35 * np.ones((1, 2))
-    mass[np.array([1, 8, 5, 10]), np.array([5, 10, 1, 8])] = (22*aV) * np.ones((1, 4))
-    mass[np.array([1, 2, 7, 8]), np.array([7, 8, 1, 2])] = 27 * np.ones((1, 4))
-    mass[np.array([1, 4, 11, 8]), np.array([11, 8, 1, 4])] = (-13*aV) * np.ones((1, 4))
-    mass[np.array([2, 7, 4, 11]), np.array([4, 11, 2, 7])] = (-22*aV) * np.ones((1, 4))
-    mass[np.array([2, 5, 10, 7]), np.array([10, 7, 2, 5])] = (13*aV) * np.ones((1, 4))
-    mass[np.array([3, 9]), np.array([9, 3])] = (-35*rV) * np.ones((1, 2))
-    mass[np.array([4, 5, 10, 11]), np.array([10, 11, 4, 5])] = (-6*a2V) * np.ones((1, 4))
-    mass = (rho*area*aV/105)*mass
+    mass[np.array([0, 6]), np.array([0, 6])] += 70
+    mass[np.array([1, 2, 7, 8]), np.array([1, 2, 7, 8])] += 78
+    mass[np.array([3, 9]), np.array([3, 9])] += 70*rV
+    mass[np.array([4, 5, 10, 11]), np.array([4, 5, 10, 11])] += 8*a2V
+    mass[np.array([0]), np.array([6])] += 35
+    mass[np.array([1, 8, 2, 7]), np.array([5, 10, 4, 11])] += 22*aV
+    mass[np.array([1, 2]), np.array([7, 8])] += 27
+    mass[np.array([2, 5, 1, 4]), np.array([10, 7, 11, 8])] += 13*aV
+    mass[np.array([3]), np.array([9])] += -35*rV
+    mass[np.array([4, 5]), np.array([10, 11])] += -6*a2V
+    mass[np.array([1, 4, 2, 7]), np.array([11, 8, 4, 11])] *= -1
+    mass *= rho*A*aV/105
+    mass = np.tril(mass.T) + np.triu(mass, 1)
     return mass
 
 def kMat(A, E, G, a, Iy, Iz, Jx):
-    a2V = a**2
-    a3V = a**3
     k = np.zeros((12, 12), dtype=float)
-    k[0, 0] = A*E/(2*a)
-    k[0, 6] = -A*E/(2*a)
-    k[1, 1] = 3*E*Iz/(2*a3V)
-    k[1, 5] = 3*E*Iz/(2*a2V)
-    k[1, 7] = -k[1, 1]
-    k[1, 11] = k[1, 5]
-    k[2, 2] = 3*E*Iy/(2*a3V)
-    k[2, 4] = 3*E*Iy/(2*a2V)
-    k[2, 8] = -k[2, 2]
-    k[2, 10] = -3*E*Iy/(2*a2V)
-    k[3, 3] = G*Jx/(2*a)
-    k[3, 9] = -k[3, 3]
-    k[4, 4] = 2*E*Iy/a
-    k[4, 8] = 3*E*Iy/(2*a2V)
-    k[4, 10] = E*Iy/a
-    k[5, 5] = 2*E*Iz/a
-    k[5,7] = -3*E*Iz/(2*a2V)
-    k[5,11] = E*Iz/a
-    k[6,6] = A*E/(2*a)
-    k[7,7] = 3*Iz*E/(2*a3V)
-    k[7,11] = -3*Iz*E/(2*a2V)
-    k[8,8] = k[7,7]
-    k[8,10] = -k[7,11]
-    k[9,9] = k[3,3]
-    k[10,10] = k[4,4]
-    k[11,11] = k[5,5]
+    # Set numerators
+    k[np.array([0, 6, 0]), np.array([0, 6, 6])] += A*E
+    k[np.array([1, 7, 5, 1, 7, 1, 1]), np.array([1, 7, 7, 5, 11, 7, 11])] += 3*E*Iz
+    k[np.array([2, 8, 2, 8, 4, 2, 2]), np.array([2, 8, 4, 10, 8, 8, 10])] += 3*E*Iy
+    k[np.array([3, 9, 3]), np.array([3, 9, 9])] += G*Jx
+    k[np.array([4, 10, 4]), np.array([4, 10, 10])] += 2*E*Iy
+    k[np.array([5, 11, 5]), np.array([5, 11, 11])] += 2*E*Iz
+    # Set denominators
+    k[np.array([0, 3, 6, 9, 0, 3, 4, 5]), np.array([0, 3, 6, 9, 6, 9, 10, 11])] *= 1/(2*a)
+    k[np.array([2, 5, 8, 1, 4, 7, 2, 1]), np.array([4, 7, 10, 5, 8, 11, 10, 11])] *= 1/(2*a**2)
+    k[np.array([1, 2, 7, 8, 1, 2]), np.array([1, 2, 7, 8, 7, 8])] *= 1/(2*a**3)
+    k[np.array([4, 5, 10, 11]), np.array([4, 5, 10, 11])] *= 1/a
+    # Set negative values
+    k[np.array([2, 5, 7, 0, 1, 2, 3, 2]), np.array([4, 7, 11, 6, 7, 8, 9, 10])] *= -1
     k = np.tril(k.T) + np.triu(k, 1)
-    # k[np.array([0, 6]), np.array([0, 6])] = A*E/(2*a)*np.ones((1, 2))
-    # k[np.array([1, 2, 7, 8]), np.array([1, 2, 7, 8])] = 3*E*Iz/(2*a3V)* np.ones((1, 4))
-    # k[np.array([3, 9]), np.array([3, 9])] = G*Jx/(2*a) * np.ones((1, 2))
-    # k[np.array([4, 5, 10, 11]), np.array([4, 5, 10, 11])] = 2*E*Iy/a * np.ones((1, 4))
-    # k[np.array([0, 6]), np.array([6, 0])] = -A*E/(2*a) * np.ones((1, 2))
-    # k[np.array([1, 8, 5, 10, 1, 4, 11, 8]), np.array([5, 10, 1, 8, 11, 8, 1, 4])] = 3*E*Iz/(2*a2V) * np.ones((1, 8))
-    # k[np.array([1, 2, 7, 8]), np.array([7, 8, 1, 2])] = -3*E*Iz/(2*a3V) * np.ones((1, 4))
-    # k[np.array([2, 7, 4, 11]), np.array([4, 11, 2, 7])] = 3*E*Iy/(2*a2V) * np.ones((1, 4))
-    # k[np.array([2, 5, 10, 7]), np.array([10, 7, 2, 5])] = 0 * np.ones((1, 4))
-    # k[np.array([3, 9]), np.array([9, 3])] = 0 * np.ones((1, 2))
-    # k[np.array([4, 5, 10, 11]), np.array([10, 11, 4, 5])] = 0 * np.ones((1, 4))
     return k
 
 
