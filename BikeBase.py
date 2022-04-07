@@ -2,49 +2,31 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d
-from elemForm import frameForm
 
 
-# Major Nodes in Bike Frame
-mNodes = np.array([[0, 0, 0], [-3, 1, 1], [-3, 1, -1], [0, 4, 0], [6, 3, 0], [6, 4, 0]], dtype=float)
-# mNodes = np.array([[0, 0, 0], [1, 1, 1]], dtype=float)
-# Major Node Pairs defining the Bike Frame
-mPairs = np.array([[1, 2], [1, 3], [1, 4], [1, 5], [2, 4], [3, 4], [4, 6], [5, 6]], dtype=int)
-# mPairs = np.array([[1, 2]], dtype=int)
-# Number of Elements in each piece of the Bike Frame
-nElem = np.array([20, 20, 20, 20, 20, 20, 20, 20], dtype=int)
-# nElem = np.array([2], dtype=int)
-
-# Define element constants
-eM = 1  # Elastic Modulus
-sM = 1  # Shear Modulus
-rho = 1  # Density
-area = np.array([1, 1, 1, 1, 1, 1, 1, 1])  # Element Areas
-mI = np.array([[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]])  # Element Moment of Inertia
-mJ = np.array([1, 1, 1, 1, 1, 1, 1, 1])  # Element Polar Moment of Inertia
-
-
-def frameForm(mNodes, mPairs, nElem, eM, sM, rho, area, mI, mJ):
-    nPairs = np.shape(mPairs)[0]
-    unitV = np.zeros((nPairs, 3), dtype=float)
-    distV = np.zeros((nPairs, 1), dtype=float)
-    nodeDF = pd.DataFrame(data=np.concatenate((mNodes, np.zeros((np.sum(nElem) - len(nElem), 3)))),
-                          columns=['X', 'Y', 'Z'])
-    elemDF = pd.DataFrame(data=np.zeros((np.sum(nElem), 11)),
-                          columns=['Node 1', 'Node 2', 'A', 'E', 'G', 'rho', 'a', 'Ix', 'Iy', 'Iz', 'Jx'])
-    nInd = len(mNodes)
+def frameForm(propFile):
+    baseDF = pd.read_csv(propFile, header=0, skiprows=[1])
+    nPairs = len(baseDF)
+    nodeDF = pd.DataFrame(columns=['X', 'Y', 'Z'])
+    elemDF = pd.DataFrame(columns=['Node 1', 'Node 2', 'A', 'E', 'G', 'rho', 'a', 'Ix', 'Iy', 'Iz', 'J', 'xV', 'yV', 'zV'])
     eInd = 0
+    print(baseDF.columns)
+    nInd = int(baseDF[['p1', 'p2']].to_numpy().max())
     for ind in range(nPairs):
-        ind1 = mPairs[ind, 0] - 1
-        ind2 = mPairs[ind, 1] - 1
-        temp1 = mNodes[ind1, :]
-        temp2 = mNodes[ind2, :]
+        ind1 = baseDF['p1'].iloc[ind] - 1
+        ind2 = baseDF['p2'].iloc[ind] - 1
+        eNum = baseDF['numElem'].iloc[ind]
+        temp1 = baseDF[['x1', 'y1', 'z1']].iloc[ind].to_numpy()
+        temp2 = baseDF[['x2', 'y2', 'z2']].iloc[ind].to_numpy()
         unitV = temp2 - temp1
-        distV = np.sqrt(np.sum(np.square(unitV)))
+        distV = np.sqrt(np.dot(unitV, unitV))
         unitV = unitV / distV
-        eNum = nElem[ind]
         dD = distV / eNum
-        conLst = [area[ind], eM, sM, rho, dD/2]+list(mI[ind, :])+[mJ[ind]]
+        conLst = baseDF[['A', 'E', 'G', 'rho', 'Ix', 'Iy', 'Iz', 'J']].iloc[ind].tolist()
+        conLst.insert(4, dD/2)
+        conLst += list(unitV)
+        nodeDF.loc[ind1] = temp1
+        nodeDF.loc[ind2] = temp2
         for node in range(eNum):
             if node == 0:
                 elemDF.loc[eInd] = [ind1, nInd]+conLst
@@ -58,38 +40,34 @@ def frameForm(mNodes, mPairs, nElem, eM, sM, rho, area, mI, mJ):
                     eInd += 1
                 nodeDF.loc[nInd] = temp1 + dD * unitV * node
                 nInd += 1
-    return nodeDF, elemDF
+    return nodeDF.sort_index(), elemDF.sort_index()
 
-def massMat(rho, A, aV, Jx):
-    # den: material density
-    # A: cross sectional A
-    # elemL: length of element
-    # Jx: second moment of A
-    rV = Jx/A
-    a2V = aV**2
+def massMat(rho, A, a, J):
+    rV = J/A
+    a2 = a**2
     mass = np.zeros((12, 12), dtype=float)
     mass[np.array([0, 6]), np.array([0, 6])] += 70
     mass[np.array([1, 2, 7, 8]), np.array([1, 2, 7, 8])] += 78
     mass[np.array([3, 9]), np.array([3, 9])] += 70*rV
-    mass[np.array([4, 5, 10, 11]), np.array([4, 5, 10, 11])] += 8*a2V
+    mass[np.array([4, 5, 10, 11]), np.array([4, 5, 10, 11])] += 8*a2
     mass[np.array([0]), np.array([6])] += 35
-    mass[np.array([1, 8, 2, 7]), np.array([5, 10, 4, 11])] += 22*aV
+    mass[np.array([1, 8, 2, 7]), np.array([5, 10, 4, 11])] += 22*a
     mass[np.array([1, 2]), np.array([7, 8])] += 27
-    mass[np.array([2, 5, 1, 4]), np.array([10, 7, 11, 8])] += 13*aV
+    mass[np.array([2, 5, 1, 4]), np.array([10, 7, 11, 8])] += 13*a
     mass[np.array([3]), np.array([9])] += -35*rV
-    mass[np.array([4, 5]), np.array([10, 11])] += -6*a2V
+    mass[np.array([4, 5]), np.array([10, 11])] += -6*a2
     mass[np.array([1, 4, 2, 7]), np.array([11, 8, 4, 11])] *= -1
-    mass *= rho*A*aV/105
+    mass *= rho*A*a/105
     mass = np.tril(mass.T) + np.triu(mass, 1)
     return mass
 
-def kMat(A, E, G, a, Iy, Iz, Jx):
+def kMat(A, E, G, a, Iy, Iz, J):
     k = np.zeros((12, 12), dtype=float)
     # Set numerators
     k[np.array([0, 6, 0]), np.array([0, 6, 6])] += A*E
     k[np.array([1, 7, 5, 1, 7, 1, 1]), np.array([1, 7, 7, 5, 11, 7, 11])] += 3*E*Iz
     k[np.array([2, 8, 2, 8, 4, 2, 2]), np.array([2, 8, 4, 10, 8, 8, 10])] += 3*E*Iy
-    k[np.array([3, 9, 3]), np.array([3, 9, 9])] += G*Jx
+    k[np.array([3, 9, 3]), np.array([3, 9, 9])] += G*J
     k[np.array([4, 10, 4]), np.array([4, 10, 10])] += 2*E*Iy
     k[np.array([5, 11, 5]), np.array([5, 11, 11])] += 2*E*Iz
     # Set denominators
@@ -102,14 +80,38 @@ def kMat(A, E, G, a, Iy, Iz, Jx):
     k = np.tril(k.T) + np.triu(k, 1)
     return k
 
+def transM(locUV):
+    v2 = locUV + [0, 0, 1]
+    v1 = np.cross(locUV, v2)
+    v2 = np.cross(locUV, v1)
+    v1 = v1/np.sqrt(np.dot(v1, v1))
+    v2 = v2 / np.sqrt(np.dot(v2, v2))
+    locC = np.array([locUV, v1, v2])
+    globC = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+    tVal = np.zeros((3, 3))
+    for g in range(3):
+        for l in range(3):
+            tVal[l, g] = np.dot(locC[l, :], globC[g, :])
+    tMat = np.zeros((12, 12))
+    tMat[0:3, 0:3] = tVal
+    tMat[3:6, 3:6] = tVal
+    tMat[6:9, 6:9] = tVal
+    tMat[9:12, 9:12] = tVal
+    return tMat
 
 def glob(nodeDF, elemDF):
     nNum = len(nodeDF)
     massG = np.zeros((nNum*6, nNum*6), dtype=float)
     kG = np.zeros((nNum*6, nNum*6), dtype=float)
     for index, row in elemDF.iterrows():
-        tempM = massMat(row['rho'], row['A'], row['a'], row['Jx'])
-        tempK = kMat(row['A'], row['E'], row['G'], row['a'], row['Iy'], row['Iz'], row['Jx'])
+        # Calculate mass and stiffness matrices
+        tempM = massMat(row['rho'], row['A'], row['a'], row['J'])
+        tempK = kMat(row['A'], row['E'], row['G'], row['a'], row['Iy'], row['Iz'], row['J'])
+        # Coordinate transformation
+        tMat = transM(row[['xV', 'yV', 'zV']].to_numpy())
+        tMatT = np.transpose(tMat)
+        tempM = tMatT*tempM*tMat
+        tempK = tMatT*tempK*tMat
         node1 = int(row['Node 1'])
         node2 = int(row['Node 2'])
         #Mass Matrix Assembly
@@ -125,7 +127,8 @@ def glob(nodeDF, elemDF):
     return massG, kG
 
 
-df1, df2 = frameForm(mNodes, mPairs, nElem, eM, sM, rho, area, mI, mJ)
+frameFile = r"C:\Users\Natalie\OneDrive - University of Cincinnati\Documents\UCFiles\Spring2022\AEEM7052\Final Project\FrameProperties.csv"
+df1, df2 = frameForm(frameFile)
 print(df1)
 print(df2)
 
