@@ -7,14 +7,15 @@ from mpl_toolkits import mplot3d
 def frameForm(propFile):
     baseDF = pd.read_csv(propFile, header=0, skiprows=[1])
     nPairs = len(baseDF)
-    nodeDF = pd.DataFrame(columns=['X', 'Y', 'Z'])
-    elemDF = pd.DataFrame(columns=['Node 1', 'Node 2', 'A', 'E', 'G', 'rho', 'a', 'Ix', 'Iy', 'Iz', 'J', 'xV', 'yV', 'zV'])
+    nodeDF = pd.DataFrame(columns=['X', 'Y', 'Z'], dtype=float)
+    elemDF = pd.DataFrame(columns=['Node 1', 'Node 2', 'A', 'E', 'G', 'rho', 'a', 'Ix', 'Iy', 'Iz', 'J', 'xV', 'yV', 'zV'], dtype=float)
+    elemDF = elemDF.astype({'Node 1': int, 'Node 2': int})
     eInd = 0
     print(baseDF.columns)
     nInd = int(baseDF[['p1', 'p2']].to_numpy().max())
     for ind in range(nPairs):
-        ind1 = baseDF['p1'].iloc[ind] - 1
-        ind2 = baseDF['p2'].iloc[ind] - 1
+        ind1 = int(baseDF['p1'].iloc[ind] - 1)
+        ind2 = int(baseDF['p2'].iloc[ind] - 1)
         eNum = baseDF['numElem'].iloc[ind]
         temp1 = baseDF[['x1', 'y1', 'z1']].iloc[ind].to_numpy()
         temp2 = baseDF[['x2', 'y2', 'z2']].iloc[ind].to_numpy()
@@ -99,6 +100,11 @@ def transM(locUV):
     tMat[9:12, 9:12] = tVal
     return tMat
 
+def findClose(pt, nodeDF):
+    dist = nodeDF.apply(lambda row: np.abs(np.linalg.norm(row[['X', 'Y', 'Z']].to_numpy()-pt)), axis=1)
+    ind = dist.idxmin()
+    return ind, nodeDF.iloc[ind]
+
 def glob(nodeDF, elemDF):
     nNum = len(nodeDF)
     massG = np.zeros((nNum*6, nNum*6), dtype=float)
@@ -126,12 +132,46 @@ def glob(nodeDF, elemDF):
         kG[6 * node2:6 * (node2 + 1), 6 * node1:6 * (node1 + 1)] += tempK[6:, :6]
     return massG, kG
 
+def appBound(boundFile, nodeDF):
+    boundDF = pd.read_csv(boundFile, header=0, skiprows=[1])
+    indLst = []
+    for index, row in boundDF.iterrows():
+        # Locate closest point
+        ind, _ = findClose(row[['X', 'Y', 'Z']].to_numpy(), nodeDF)
+        # Define fixed degrees of freedom
+        lInd = np.where(row[['DOF 1', 'DOF 2', 'DOF 3', 'DOF 4', 'DOF 5', 'DOF 6']].to_numpy())[0].tolist()
+        if len(lInd) > 0:
+            indLst.extend(6*ind+lInd)
+    indLst.sort()
+    return indLst
+
+def forceVect(forceFile, nodeDF):
+    forceDF = pd.read_csv(forceFile, header=0, skiprows=[1])
+    forceV = np.zeros((6*len(nodeDF),), dtype=float)
+    for index, row in forceDF.iterrows():
+        # Calculated unit direction vector
+        temp = row[['xV', 'yV', 'zV']].to_numpy()
+        dV = np.sqrt(np.dot(temp, temp))
+        temp = temp/dV
+        # Locate closest point
+        ind, _ = findClose(row[['X', 'Y', 'Z']].to_numpy(), nodeDF)
+        forceV[6*ind+[0, 1, 2]] = row['mag']*temp
+    return forceV
 
 frameFile = r"C:\Users\Natalie\OneDrive - University of Cincinnati\Documents\UCFiles\Spring2022\AEEM7052\Final Project\FrameProperties.csv"
-df1, df2 = frameForm(frameFile)
-print(df1)
-print(df2)
+boundFile = r"C:\Users\Natalie\OneDrive - University of Cincinnati\Documents\UCFiles\Spring2022\AEEM7052\Final Project\boundaryCond.csv"
+forceFile = r"C:\Users\Natalie\OneDrive - University of Cincinnati\Documents\UCFiles\Spring2022\AEEM7052\Final Project\appForce.csv"
+nodeDF, elemDF = frameForm(frameFile)
+print(nodeDF)
+print(elemDF)
 
-mM, kM = glob(df1, df2)
+mM, kM = glob(nodeDF, elemDF)
 print(np.shape(mM))
 print(np.shape(kM))
+
+indLst = appBound(boundFile, nodeDF)
+print(indLst)
+
+forceV = forceVect(forceFile, nodeDF)
+print(forceV)
+
