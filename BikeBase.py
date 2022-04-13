@@ -12,7 +12,6 @@ def frameForm(propFile):
     elemDF = pd.DataFrame(columns=['Node 1', 'Node 2', 'A', 'E', 'G', 'rho', 'a', 'Ix', 'Iy', 'Iz', 'J', 'xV', 'yV', 'zV'], dtype=float)
     elemDF = elemDF.astype({'Node 1': int, 'Node 2': int})
     eInd = 0
-    # print(baseDF)
     nInd = int(baseDF[['p1', 'p2']].to_numpy().max())
     for ind in range(nPairs):
         ind1 = int(baseDF['p1'].iloc[ind] - 1)
@@ -141,19 +140,6 @@ def glob(nodeDF, elemDF, globC, dim2=False):
         tempK = np.matmul(np.matmul(tMatT, tempK), tMat)
         node1 = int(row['Node 1'])
         node2 = int(row['Node 2'])
-        # if index == 81:
-        #     print("Element Mass Matrix:")
-        #     print(tempM)
-        #     print(np.allclose(tempM, tempM.T))
-        #     print("Element Stiffness Matrix:")
-        #     print(tempK)
-        #     print(np.allclose(tempK, tempK.T))
-        #     print("Stiffness Matrix Row Sum:")
-        #     print(np.sum(tempK, axis=0))
-        #     print("Stiffness Matrix Column Sum:")
-        #     print(np.sum(tempK, axis=1))
-        #     print("Stiffness Matrix Full Sum:")
-        #     print(np.sum(tempK))
         #Mass Matrix Assembly
         massG[6*node1:6*(node1+1), 6*node1:6*(node1+1)] += tempM[:6, :6]
         massG[6*node2:6*(node2+1), 6*node2:6*(node2+1)] += tempM[6:, 6:]
@@ -164,14 +150,12 @@ def glob(nodeDF, elemDF, globC, dim2=False):
         kG[6 * node2:6 * (node2 + 1), 6 * node2:6 * (node2 + 1)] += tempK[6:, 6:]
         kG[6 * node1:6 * (node1 + 1), 6 * node2:6 * (node2 + 1)] += tempK[:6, 6:]
         kG[6 * node2:6 * (node2 + 1), 6 * node1:6 * (node1 + 1)] += tempK[6:, :6]
-        # pd.DataFrame(kG).to_csv("Global3D.csv")
     if dim2:
         delInd = np.tile([2, 3, 4], nNum) + 6 * np.repeat(np.arange(nNum), 3)
         kG_R = np.delete(kG, delInd, axis=0)
         kG_R = np.delete(kG_R, delInd, axis=1)
         massG_R = np.delete(massG, delInd, axis=0)
         massG_R = np.delete(massG_R, delInd, axis=1)
-        # pd.DataFrame(kG_R).to_csv("Global2D.csv")
         return massG_R, kG_R
 
     else:
@@ -246,8 +230,6 @@ def staticSolve(kM, forceV, boundInd):
     fV_R = np.delete(forceV, boundInd)
     print(np.shape(fV_R))
     # Solve for nodal displacement
-    # lu, piv = la.lu_factor(kM_R)
-    # nDis = la.lu_solve((lu, piv), fV_R)
     nDis_R = la.solve(kM_R, fV_R, assume_a='sym')
     nDis = np.zeros(np.shape(forceV))
     nDis[boundInd] = np.zeros(len(boundInd))
@@ -269,58 +251,45 @@ nodeDF, elemDF = frameForm(frameFile)
 nodeDF.to_csv("nodesVer.csv")
 elemDF.to_csv("elementsVer.csv")
 mM, kM = glob(nodeDF, elemDF, globC, True)
-# print(kM)
-print(np.shape(kM))
 
 boundInd = appBound(boundFile, nodeDF, True)
-print(boundInd)
 
 staticFV, dynamicFunc = forceVect(forceFile, nodeDF, True)
-# print(staticFV)
-print(np.shape(staticFV))
+
 nDis, nFor = staticSolve(kM, staticFV, boundInd)
 nd_df = pd.DataFrame(data=np.array_split(nDis, len(nodeDF)), columns=["DOF 1 Displacement", "DOF 2 Displacement", "DOF 6 Displacement"])
 nf_df = pd.DataFrame(data=np.array_split(nFor, len(nodeDF)), columns=["DOF 1 Force", "DOF 2 Force", "DOF 6 Force"])
 pd.concat([nodeDF, nd_df, nf_df], axis=1).to_csv("Verification.csv")
 
-# # Bike Problem
-# pFolder = r"C:\Users\Natalie\OneDrive - University of Cincinnati\Documents\UCFiles\Spring2022\AEEM7052\Final Project"
-# frameFile = pFolder + r"\FramePropertiesBase.csv"
-# boundFile = pFolder + r"\boundaryCondBase.csv"
-# forceFile = [pFolder + r"\appForceBase_" + s + ".csv" for s in ["S1", "S2", "D1"]]
-#
-# globC = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
-#
-# nodeDF, elemDF = frameForm(frameFile)
-# # nodeDF.to_csv("nodes.csv")
-# # elemDF.to_csv("elements.csv")
-# mM, kM = glob(nodeDF, elemDF, globC)
-#
-# # print("Mass Matrix Symmetry")
-# # print(np.allclose(mM, mM.T))
-# # print("Stiffness Matrix Symmetry")
-# # print(np.allclose(kM, kM.T))
-# # print("Stiffness Matrix Row Sum:")
-# # print(np.sum(kM, axis=0))
-# # print("Stiffness Matrix Column Sum:")
-# # print(np.sum(kM, axis=1))
-#
-# boundInd = appBound(boundFile, nodeDF)
-# print(boundInd)
-#
-# solI = 1
-# for file in forceFile:
-#     staticFV, dynamicFunc = forceVect(file, nodeDF)
-#     if bool(dynamicFunc):
-#         print("Dynamic Case")
-#     else:
-#         print("Static Case")
-#         nDis, nFor = staticSolve(kM, staticFV, boundInd)
-#         nd_df = pd.DataFrame(data=np.array_split(nDis, len(nodeDF)), columns=["DOF 1 Displacement", "DOF 2 Displacement", "DOF 3 Displacement", "DOF 4 Displacement", "DOF 5 Displacement", "DOF 6 Displacement"])
-#         nf_df = pd.DataFrame(data=np.array_split(nFor, len(nodeDF)), columns=["DOF 1 Force", "DOF 2 Force", "DOF 3 Force", "DOF 4 Force", "DOF 5 Force", "DOF 6 Force"])
-#         strT = "staticRes"+str(solI)+".csv"
-#         pd.concat([nodeDF, nd_df, nf_df], axis=1).to_csv(strT)
-#         solI += 1
-#         print(nDis[:6])
-#         print(nFor[:6])
-#
+# Bike Problem
+pFolder = r"C:\Users\Natalie\OneDrive - University of Cincinnati\Documents\UCFiles\Spring2022\AEEM7052\Final Project"
+frameFile = pFolder + r"\FramePropertiesBase.csv"
+boundFile = pFolder + r"\boundaryCondBase.csv"
+forceFile = [pFolder + r"\appForceBase_" + s + ".csv" for s in ["S1", "S2", "D1"]]
+
+globC = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+
+nodeDF, elemDF = frameForm(frameFile)
+nodeDF.to_csv("nodes.csv")
+elemDF.to_csv("elements.csv")
+mM, kM = glob(nodeDF, elemDF, globC)
+
+boundInd = appBound(boundFile, nodeDF)
+print(boundInd)
+
+solI = 1
+for file in forceFile:
+    staticFV, dynamicFunc = forceVect(file, nodeDF)
+    if bool(dynamicFunc):
+        print("Dynamic Case")
+    else:
+        print("Static Case")
+        nDis, nFor = staticSolve(kM, staticFV, boundInd)
+        nd_df = pd.DataFrame(data=np.array_split(nDis, len(nodeDF)), columns=["DOF 1 Displacement", "DOF 2 Displacement", "DOF 3 Displacement", "DOF 4 Displacement", "DOF 5 Displacement", "DOF 6 Displacement"])
+        nf_df = pd.DataFrame(data=np.array_split(nFor, len(nodeDF)), columns=["DOF 1 Force", "DOF 2 Force", "DOF 3 Force", "DOF 4 Force", "DOF 5 Force", "DOF 6 Force"])
+        strT = "staticRes"+str(solI)+".csv"
+        pd.concat([nodeDF, nd_df, nf_df], axis=1).to_csv(strT)
+        solI += 1
+        print(nDis[:6])
+        print(nFor[:6])
+
