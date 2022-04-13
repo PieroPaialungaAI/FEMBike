@@ -12,7 +12,7 @@ def frameForm(propFile):
     elemDF = pd.DataFrame(columns=['Node 1', 'Node 2', 'A', 'E', 'G', 'rho', 'a', 'Ix', 'Iy', 'Iz', 'J', 'xV', 'yV', 'zV'], dtype=float)
     elemDF = elemDF.astype({'Node 1': int, 'Node 2': int})
     eInd = 0
-    print(baseDF.columns)
+    # print(baseDF)
     nInd = int(baseDF[['p1', 'p2']].to_numpy().max())
     for ind in range(nPairs):
         ind1 = int(baseDF['p1'].iloc[ind] - 1)
@@ -61,7 +61,7 @@ def massMat(rho, A, a, J):
     mass[np.array([4, 5]), np.array([10, 11])] += -6*a2
     mass[np.array([1, 4, 2, 7]), np.array([11, 8, 4, 11])] *= -1
     mass *= rho*A*a/105
-    mass = np.tril(mass.T) + np.triu(mass, 1)
+    mass += np.tril(mass.T, -1)
     return mass
 
 
@@ -81,22 +81,25 @@ def kMat(A, E, G, a, Iy, Iz, J):
     k[np.array([4, 5, 10, 11]), np.array([4, 5, 10, 11])] *= 1/a
     # Set negative values
     k[np.array([2, 5, 7, 0, 1, 2, 3, 2]), np.array([4, 7, 11, 6, 7, 8, 9, 10])] *= -1
-    k = np.tril(k.T) + np.triu(k, 1)
+    k += np.tril(k.T, -1)
     return k
 
 
-def transM(locUV):
+def transM(locUV, globC):
+    # Find local y and z directions
     v2 = [locUV[num]+num for num in range(3)]
     v1 = np.cross(locUV, v2)
     v2 = np.cross(locUV, v1)
-    v1 = v1/np.sqrt(np.dot(v1, v1))
+    # Convert to unit vector
+    v1 = v1 / np.sqrt(np.dot(v1, v1))
     v2 = v2 / np.sqrt(np.dot(v2, v2))
+    locUV = locUV / np.sqrt(np.dot(locUV, locUV))
+    # Define local and global coordinate systems
     locC = np.array([locUV, v1, v2])
-    globC = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
     tVal = np.zeros((3, 3))
-    for g in range(3):
-        for l in range(3):
-            tVal[l, g] = np.dot(locC[l, :], globC[g, :])
+    for gC in range(3):
+        for lC in range(3):
+            tVal[lC, gC] = np.dot(locC[lC, :], globC[gC, :])
     tMat = np.zeros((12, 12))
     tMat[0:3, 0:3] = tVal
     tMat[3:6, 3:6] = tVal
@@ -111,7 +114,7 @@ def findClose(pt, nodeDF):
     return ind, nodeDF.iloc[ind]
 
 
-def glob(nodeDF, elemDF):
+def glob(nodeDF, elemDF, globC):
     nNum = len(nodeDF)
     massG = np.zeros((nNum*6, nNum*6), dtype=float)
     kG = np.zeros((nNum*6, nNum*6), dtype=float)
@@ -120,10 +123,10 @@ def glob(nodeDF, elemDF):
         tempM = massMat(row['rho'], row['A'], row['a'], row['J'])
         tempK = kMat(row['A'], row['E'], row['G'], row['a'], row['Iy'], row['Iz'], row['J'])
         # Coordinate transformation
-        tMat = transM(row[['xV', 'yV', 'zV']].to_numpy())
+        tMat = transM(row[['xV', 'yV', 'zV']].to_numpy(), globC)
         tMatT = np.transpose(tMat)
-        tempM = tMatT*tempM*tMat
-        tempK = tMatT*tempK*tMat
+        tempM = np.matmul(np.matmul(tMatT, tempM), tMat)
+        tempK = np.matmul(np.matmul(tMatT, tempK), tMat)
         node1 = int(row['Node 1'])
         node2 = int(row['Node 2'])
         # if index == 81:
@@ -204,15 +207,17 @@ def staticSolve(kM, forceV, boundInd):
 
 
 pFolder = r"C:\Users\Natalie\OneDrive - University of Cincinnati\Documents\UCFiles\Spring2022\AEEM7052\Final Project"
-frameFile = pFolder + r"\FrameProperties.csv"
-boundFile = pFolder + r"\boundaryCond.csv"
-forceFile = [pFolder + r"\appForce_" + s + ".csv" for s in ["S1", "S2", "D1"]]
+frameFile = pFolder + r"\FramePropertiesBase.csv"
+boundFile = pFolder + r"\boundaryCondBase.csv"
+forceFile = [pFolder + r"\appForceBase_" + s + ".csv" for s in ["S1", "S2", "D1"]]
 # forceFile = [pFolder + r"\appForce_simp.csv"]
+
+globC = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
 
 nodeDF, elemDF = frameForm(frameFile)
 # nodeDF.to_csv("nodes.csv")
 # elemDF.to_csv("elements.csv")
-mM, kM = glob(nodeDF, elemDF)
+mM, kM = glob(nodeDF, elemDF, globC)
 
 # print("Mass Matrix Symmetry")
 # print(np.allclose(mM, mM.T))
@@ -226,6 +231,7 @@ mM, kM = glob(nodeDF, elemDF)
 boundInd = appBound(boundFile, nodeDF)
 print(boundInd)
 
+solI = 1
 for file in forceFile:
     staticFV, dynamicFunc = forceVect(file, nodeDF)
     if bool(dynamicFunc):
@@ -233,6 +239,11 @@ for file in forceFile:
     else:
         print("Static Case")
         nDis, nFor = staticSolve(kM, staticFV, boundInd)
-        print(np.nonzero(nDis))
-        print(np.nonzero(nFor))
+        nd_df = pd.DataFrame(data=np.array_split(nDis, len(nodeDF)), columns=["DOF 1 Displacement", "DOF 2 Displacement", "DOF 3 Displacement", "DOF 4 Displacement", "DOF 5 Displacement", "DOF 6 Displacement"])
+        nf_df = pd.DataFrame(data=np.array_split(nFor, len(nodeDF)), columns=["DOF 1 Force", "DOF 2 Force", "DOF 3 Force", "DOF 4 Force", "DOF 5 Force", "DOF 6 Force"])
+        strT = "staticRes"+str(solI)+".csv"
+        pd.concat([nodeDF, nd_df, nf_df], axis=1).to_csv(strT)
+        solI += 1
+        print(nDis[:6])
+        print(nFor[:6])
 
