@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d
+import scipy.linalg as la
 
 
 def frameForm(propFile):
@@ -43,6 +44,7 @@ def frameForm(propFile):
                 nInd += 1
     return nodeDF.sort_index(), elemDF.sort_index()
 
+
 def massMat(rho, A, a, J):
     rV = J/A
     a2 = a**2
@@ -61,6 +63,7 @@ def massMat(rho, A, a, J):
     mass *= rho*A*a/105
     mass = np.tril(mass.T) + np.triu(mass, 1)
     return mass
+
 
 def kMat(A, E, G, a, Iy, Iz, J):
     k = np.zeros((12, 12), dtype=float)
@@ -81,8 +84,9 @@ def kMat(A, E, G, a, Iy, Iz, J):
     k = np.tril(k.T) + np.triu(k, 1)
     return k
 
+
 def transM(locUV):
-    v2 = locUV + [0, 0, 1]
+    v2 = [locUV[num]+num for num in range(3)]
     v1 = np.cross(locUV, v2)
     v2 = np.cross(locUV, v1)
     v1 = v1/np.sqrt(np.dot(v1, v1))
@@ -100,10 +104,12 @@ def transM(locUV):
     tMat[9:12, 9:12] = tVal
     return tMat
 
+
 def findClose(pt, nodeDF):
     dist = nodeDF.apply(lambda row: np.abs(np.linalg.norm(row[['X', 'Y', 'Z']].to_numpy()-pt)), axis=1)
     ind = dist.idxmin()
     return ind, nodeDF.iloc[ind]
+
 
 def glob(nodeDF, elemDF):
     nNum = len(nodeDF)
@@ -120,6 +126,19 @@ def glob(nodeDF, elemDF):
         tempK = tMatT*tempK*tMat
         node1 = int(row['Node 1'])
         node2 = int(row['Node 2'])
+        # if index == 81:
+        #     print("Element Mass Matrix:")
+        #     print(tempM)
+        #     print(np.allclose(tempM, tempM.T))
+        #     print("Element Stiffness Matrix:")
+        #     print(tempK)
+        #     print(np.allclose(tempK, tempK.T))
+        #     print("Stiffness Matrix Row Sum:")
+        #     print(np.sum(tempK, axis=0))
+        #     print("Stiffness Matrix Column Sum:")
+        #     print(np.sum(tempK, axis=1))
+        #     print("Stiffness Matrix Full Sum:")
+        #     print(np.sum(tempK))
         #Mass Matrix Assembly
         massG[6*node1:6*(node1+1), 6*node1:6*(node1+1)] += tempM[:6, :6]
         massG[6*node2:6*(node2+1), 6*node2:6*(node2+1)] += tempM[6:, 6:]
@@ -131,6 +150,7 @@ def glob(nodeDF, elemDF):
         kG[6 * node1:6 * (node1 + 1), 6 * node2:6 * (node2 + 1)] += tempK[:6, 6:]
         kG[6 * node2:6 * (node2 + 1), 6 * node1:6 * (node1 + 1)] += tempK[6:, :6]
     return massG, kG
+
 
 def appBound(boundFile, nodeDF):
     boundDF = pd.read_csv(boundFile, header=0, skiprows=[1])
@@ -145,9 +165,15 @@ def appBound(boundFile, nodeDF):
     indLst.sort()
     return indLst
 
+
+def lamDef(mag, scale):
+    return lambda t: mag*scale*t
+
+
 def forceVect(forceFile, nodeDF):
     forceDF = pd.read_csv(forceFile, header=0, skiprows=[1])
-    forceV = np.zeros((6*len(nodeDF),), dtype=float)
+    staticFV = np.zeros((6*len(nodeDF),), dtype=float)
+    dynamicFunc = {}
     for index, row in forceDF.iterrows():
         # Calculated unit direction vector
         temp = row[['xV', 'yV', 'zV']].to_numpy()
@@ -155,23 +181,58 @@ def forceVect(forceFile, nodeDF):
         temp = temp/dV
         # Locate closest point
         ind, _ = findClose(row[['X', 'Y', 'Z']].to_numpy(), nodeDF)
-        forceV[6*ind+[0, 1, 2]] = row['mag']*temp
-    return forceV
+        if row['freq'] > 0:
+            for dirI in range(3):
+                dynamicFunc[6*ind+dirI] = lamDef(row['mag'], temp[dirI])
+        else:
+            staticFV[6*ind+[0, 1, 2]] = row['mag']*temp
+    return staticFV, dynamicFunc
 
-frameFile = r"C:\Users\Natalie\OneDrive - University of Cincinnati\Documents\UCFiles\Spring2022\AEEM7052\Final Project\FrameProperties.csv"
-boundFile = r"C:\Users\Natalie\OneDrive - University of Cincinnati\Documents\UCFiles\Spring2022\AEEM7052\Final Project\boundaryCond.csv"
-forceFile = r"C:\Users\Natalie\OneDrive - University of Cincinnati\Documents\UCFiles\Spring2022\AEEM7052\Final Project\appForce.csv"
+
+def staticSolve(kM, forceV, boundInd):
+    # Apply boundary conditions
+    kM_R = np.delete(kM, boundInd, axis=0)
+    kM_R = np.delete(kM_R, boundInd, axis=1)
+    fV_R = np.delete(forceV, boundInd)
+    # Solve for nodal displacement
+    # lu, piv = la.lu_factor(kM_R)
+    # nDis = la.lu_solve((lu, piv), fV_R)
+    nDis = la.solve(kM_R, fV_R, assume_a='sym')
+    nDis = np.insert(nDis, boundInd, np.zeros(len(boundInd),))
+    nFor = np.matmul(kM, nDis)
+    return nDis, nFor
+
+
+pFolder = r"C:\Users\Natalie\OneDrive - University of Cincinnati\Documents\UCFiles\Spring2022\AEEM7052\Final Project"
+frameFile = pFolder + r"\FrameProperties.csv"
+boundFile = pFolder + r"\boundaryCond.csv"
+forceFile = [pFolder + r"\appForce_" + s + ".csv" for s in ["S1", "S2", "D1"]]
+# forceFile = [pFolder + r"\appForce_simp.csv"]
+
 nodeDF, elemDF = frameForm(frameFile)
-print(nodeDF)
-print(elemDF)
-
+# nodeDF.to_csv("nodes.csv")
+# elemDF.to_csv("elements.csv")
 mM, kM = glob(nodeDF, elemDF)
-print(np.shape(mM))
-print(np.shape(kM))
 
-indLst = appBound(boundFile, nodeDF)
-print(indLst)
+# print("Mass Matrix Symmetry")
+# print(np.allclose(mM, mM.T))
+# print("Stiffness Matrix Symmetry")
+# print(np.allclose(kM, kM.T))
+# print("Stiffness Matrix Row Sum:")
+# print(np.sum(kM, axis=0))
+# print("Stiffness Matrix Column Sum:")
+# print(np.sum(kM, axis=1))
 
-forceV = forceVect(forceFile, nodeDF)
-print(forceV)
+boundInd = appBound(boundFile, nodeDF)
+print(boundInd)
+
+for file in forceFile:
+    staticFV, dynamicFunc = forceVect(file, nodeDF)
+    if bool(dynamicFunc):
+        print("Dynamic Case")
+    else:
+        print("Static Case")
+        nDis, nFor = staticSolve(kM, staticFV, boundInd)
+        print(np.nonzero(nDis))
+        print(np.nonzero(nFor))
 
